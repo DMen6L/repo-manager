@@ -1,5 +1,7 @@
 # Repository Manager
 
+## What it does
+
 An AI-powered repository management and visualization platform for understanding unfamiliar codebases, exploring architecture, organizing development tasks, and planning changes with repository-aware assistance.
 
 The project is being developed incrementally. The current version is a small FastAPI service with hardcoded Python repository cases. Repository parsing, graph visualization, task management, and AI features will be added on top of this foundation.
