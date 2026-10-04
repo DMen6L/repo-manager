@@ -82,7 +82,7 @@ http://127.0.0.1:8080
 
 The interactive API documentation is available at `/docs`.
 
-## Running tests
+## How to test it
 
 Run the test suite from the repository root:
 
