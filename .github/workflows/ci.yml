@@ -33,8 +33,14 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+
+      - name: Cache uv
+        uses: actions/cache@v4
         with:
-          enable-cache: true
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: backend
