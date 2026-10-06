@@ -32,12 +32,12 @@ jobs:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
 
       - name: Install dependencies
-        woring-directory: backend
+        working-directory: backend
         run: uv sync --locked
 
       - name: Run tests
