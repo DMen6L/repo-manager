@@ -15,7 +15,7 @@ def test_root_endpoint() -> None:
 def test_healthz_endpoint() -> None:
     response = client.get("/healthz")
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
