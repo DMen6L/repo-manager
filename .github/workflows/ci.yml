@@ -37,7 +37,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        woring-directory: backend
+        working-directory: backend
         run: uv sync --locked
 
       - name: Run tests
