@@ -42,6 +42,9 @@ scripts/
 ├── run.sh                  # Starts the API service
 ├── test.sh                 # Runs tests and prints TESTS: n/n
 └── count_tests.py          # Counts test results from the JUnit report
+
+.github/workflows/
+└── ci.yml                  # GitHub Actions test workflow
 ```
 
 ## Requirements
@@ -97,6 +100,35 @@ TESTS: 6/6
 ```
 
 It exits with code `0` when all tests pass and a non-zero code when tests fail.
+
+## Continuous integration
+
+GitHub Actions runs the test workflow for pull requests and for pushes to
+`main`. The workflow:
+
+1. Checks out the repository.
+2. Sets up Python 3.12 and `uv`.
+3. Restores the `uv` dependency cache using `backend/uv.lock` as the cache key.
+4. Installs the locked dependencies with `uv sync --locked`.
+5. Runs `scripts/test.sh`.
+
+The dependency cache speeds up later workflow runs while changing
+`backend/uv.lock` automatically creates a new cache entry. The workflow uses
+read-only repository permissions and pins its third-party actions to known
+versions or commits.
+
+To reproduce the CI test locally:
+
+```bash
+uv sync --directory backend --locked
+./scripts/test.sh
+```
+
+The expected successful output is:
+
+```text
+TESTS: 6/6
+```
 
 ## Current API
 
