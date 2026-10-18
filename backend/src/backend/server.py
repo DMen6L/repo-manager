@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, status
 
 app = FastAPI(title="Repository Manager API")
+
 CASES_DIR = Path(__file__).resolve().parents[2] / "cases"
 
 
