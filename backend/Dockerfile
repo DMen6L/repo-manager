@@ -19,4 +19,4 @@ EXPOSE 8080
 
 USER 1000:1000
 
-CMD ["uvicorn", "backend.server:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "exec uvicorn backend.server:app --host 0.0.0.0 --port \"$PORT\""]
