@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: repo-manager                         # 1. your service's name, e.g. notes
+spec:
+  replicas: 2                     # 2. how many copies? at least 2 - one may fail while one serves
+  selector:
+    matchLabels:
+      app: repo-manager                      # 3. the label this Deployment owns
+  template:
+    metadata:
+      labels:
+        app: repo-manager                    # 4. the label every Pod gets - the same as 3
+    spec:
+      securityContext:
+        runAsNonRoot: true           # 5. refuse to start as root (week 5: USER 1000:1000)
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          # 6. your M3 image: ghcr.io/<owner>/<project> in lowercase, a colon, the FULL 40-character SHA
+          image: ghcr.io/dmen6l/repo-manager:f8d94cbd27ca4373c1f54269d82f03988720364f
+          ports:
+            - name: http
+              containerPort: 8080    # 7. the number your ConfigMap gives PORT
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: repo-manager-config         # 8. the name of your ConfigMap (configmap.yaml)
+                  key: PORT
+            - name: UVICORN_LOG_LEVEL             # 9. one more setting your app reads, from the same ConfigMap
+              valueFrom:
+                configMapKeyRef:
+                  name: repo-manager-config         #    (the same ConfigMap as 8)
+                  key: UVICORN_LOG_LEVEL          #    (a key you put in configmap.yaml)
+            - name: FORWARDED_ALLOW_IPS             # 10. a secret your app reads, e.g. API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret   # fixed name: you and the marker create it; it is never in Git
+                  key: FORWARDED_ALLOW_IPS          #    the key inside app-secret - you choose it
+          readinessProbe:            # "should this Pod get traffic now?"
+            httpGet:
+              path: /healthz             # 11. your contract's health endpoint
+              port: http             # 12. which port? the name of the port above works
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:             # "should this container be restarted?"
+            httpGet:
+              path: /healthz             # 13. the same endpoint as 11
+              port: http             # 14. the same port as 12
+            periodSeconds: 10      # 15. how often? readiness should notice before liveness acts
+            failureThreshold: 3
+          resources:
+            requests:                # what the scheduler reserves for one Pod
+              cpu: 100m              # 16. e.g. 50m = 5% of one CPU
+              memory: 128Mi           # 17. e.g. 64Mi (Java: see the language table)
+            limits:                  # the ceiling: over the memory limit, the container is killed
+              cpu: 500m              # 18. at least the request
+              memory: 256Mi           # 19. at least the request
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp              # a writable /tmp, because the root filesystem is read-only
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
