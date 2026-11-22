@@ -1,0 +1,106 @@
+name: M5 check
+
+on:
+  push:
+    branches: [main, m5]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  m5:
+    name: mark_m5.py --kind
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the pushed commit and full history
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          # Argo CD must fetch the real pushed commit, not a PR preview merge.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install checked versions of kind, kubectl and Helm
+        env:
+          KIND_VERSION: v0.33.0
+          KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+          KUBECTL_VERSION: v1.37.1
+          KUBECTL_SHA512: decde4d990d0fbf6451e65524dec42c549de3339f27005c45af8d3c61cca1de852524ebf2215c82be86d4ab2621c823f56f718b8d2c304b9100a903e696c0c32
+          HELM_VERSION: v4.2.1
+          HELM_SHA256: 479dca836e5b45e8bd222400c5591b0e3a647378f03ff96597180db97c17fdae
+        run: |
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum -c -
+          curl -fsSLO "https://dl.k8s.io/${KUBECTL_VERSION}/kubernetes-client-linux-amd64.tar.gz"
+          echo "${KUBECTL_SHA512}  kubernetes-client-linux-amd64.tar.gz" | sha512sum -c -
+          tar -xzf kubernetes-client-linux-amd64.tar.gz kubernetes/client/bin/kubectl
+          curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm-${HELM_VERSION}-linux-amd64.tar.gz" | sha256sum -c -
+          tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz" linux-amd64/helm
+          sudo install -m 0755 kind kubernetes/client/bin/kubectl linux-amd64/helm /usr/local/bin/
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install the grader dependency
+        run: python -m pip install --quiet pyyaml==6.0.3
+
+      - name: Run the official M5 marker, static and live
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/mark_m5.py" https://raw.githubusercontent.com/inf345/inf345-week10-lab/090e437fc490e4887cd8fd1a39bc18bb2fc036fc/mark_m5.py
+          echo "6b81a9b6906663721eaf0e5e25a1ff9243c84ba0a0809cfda2f6c7bd04451e16  $RUNNER_TEMP/mark_m5.py" | sha256sum -c -
+          # The marker creates and removes its own Kubernetes 1.36.4 cluster,
+          # installs checked Argo CD 3.5.3, and never connects to a real cluster.
+          python "$RUNNER_TEMP/mark_m5.py" --path . --kind --json-out "$RUNNER_TEMP/m5-result.json"
+
+      - name: Report the M5 score and checkpoints
+        if: ${{ always() }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result_file = Path(os.environ["RUNNER_TEMP"]) / "m5-result.json"
+          if not result_file.exists():
+              raise SystemExit(0)
+          result = json.loads(result_file.read_text())
+
+          def annotation(level, title, message):
+              message = str(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::{level} title={title}::{message}")
+
+          score = result["score"]
+          total = result["checked_out_of"]
+          annotation("notice", "M5 score", f"SCORE: {score}/{total}")
+          summary = ["## M5 grading", "", f"**SCORE: {score}/{total}**", ""]
+          for gate in result["gates"]:
+              state = "PASS" if gate["ok"] else "FAIL"
+              summary.append(f"- Gate {gate['name']}: {state}")
+              if not gate["ok"]:
+                  annotation("error", "M5 gate", f"{gate['name']}: {gate['detail']}")
+          for block in result["blocks"]:
+              detail = f"{block['name']}: {block['points']}/25. {block['detail']}"
+              summary.append(f"- {detail}")
+              annotation("notice" if block["points"] == 25 else "error", "M5 checkpoint", detail)
+          for block in result["skipped"]:
+              detail = f"{block['name']}: NOT CHECKED. {block['detail']}"
+              summary.append(f"- {detail}")
+              annotation("warning", "M5 checkpoint", detail)
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as output:
+              output.write("\n".join(summary) + "\n")
+          PY
