@@ -43,8 +43,13 @@ scripts/
 ├── test.sh                 # Runs tests and prints TESTS: n/n
 └── count_tests.py          # Counts test results from the JUnit report
 
+k8s/                       # Deployment, Service, and ConfigMap
+argocd/
+└── application.yaml        # Argo CD follows main/k8s
+
 .github/workflows/
-└── ci.yml                  # GitHub Actions test workflow
+├── ci.yml                  # Tests, builds, scans, and publishes the image
+└── m5.yml                  # Tests GitOps in a throwaway kind cluster
 ```
 
 ## Requirements
@@ -129,6 +134,115 @@ The expected successful output is:
 ```text
 TESTS: 6/6
 ```
+
+## GitOps deployment
+
+Argo CD 3.5.3 deploys the plain YAML files in `k8s/` from the `main` branch of
+`https://github.com/DMen6L/repo-manager`. The Application is named `repo-manager`,
+lives in the `argocd` namespace, and deploys the service into the existing M4
+namespace, `m4`.
+
+The Application enables automated sync, `prune: true`, and `selfHeal: true`.
+Argo CD restores the replica count from Git, recreates a deleted Service, and
+removes managed resources that are removed from Git. Change the manifests in
+Git and merge a pull request to change the running service.
+
+The `app-secret` Secret is created separately in the destination namespace and
+is never committed or managed by Argo CD. This service reads its
+`FORWARDED_ALLOW_IPS` key as Uvicorn's trusted proxy allowlist. For a cluster
+without a trusted ingress proxy, create it with:
+
+```bash
+kubectl -n m4 create secret generic app-secret \
+  --from-literal=FORWARDED_ALLOW_IPS=127.0.0.1,::1
+```
+
+After installing the lab's pinned, checksum-verified Argo CD 3.5.3 and merging
+the Application into `main`, hand the M4 resources over to Argo CD. The
+destination namespace and its Secret must already exist. These commands briefly
+remove the manually deployed service; Argo CD recreates it from Git:
+
+```bash
+kubectl -n m4 delete -f k8s/
+kubectl apply -f argocd/application.yaml
+kubectl -n argocd get application repo-manager -w
+```
+
+Wait for `Synced` and `Healthy`. In another terminal, inspect the application:
+
+```bash
+kubectl -n m4 get deployment,service,pods
+kubectl -n m4 port-forward service/repo-manager 8080:80
+```
+
+Then `curl http://localhost:8080/healthz` should return `{"status":"ok"}`.
+To request a Git refresh immediately:
+
+```bash
+kubectl -n argocd annotate application repo-manager \
+  argocd.argoproj.io/refresh=normal --overwrite
+```
+
+CI continues to build, scan, and publish images to GHCR. It has no credentials
+for the application cluster and never deploys to it. A deployment changes only
+the full commit-SHA image tag in `k8s/deployment.yaml`, after that commit's
+publish job succeeds.
+
+The `M5 check` workflow runs the official grader on pushes to `m5` and `main`,
+on pull requests to `main`, and through manual dispatch. It checks out the
+actual pushed commit with full history, verifies the tool and grader downloads,
+and runs Kubernetes 1.36.4 with Argo CD 3.5.3 inside its own temporary cluster.
+The Actions summary and annotations show each checkpoint and the final score.
+This test cluster is separate from the application cluster.
+
+The published image is `linux/amd64`. Run the live grader using the GitHub
+Actions workflow on Intel runners when developing on an Apple M-series Mac.
+For local static checks from the repository root, use the project Python
+environment, which includes PyYAML:
+
+```bash
+curl -fsSLo /tmp/mark_m5.py https://raw.githubusercontent.com/inf345/inf345-week10-lab/090e437fc490e4887cd8fd1a39bc18bb2fc036fc/mark_m5.py
+echo "6b81a9b6906663721eaf0e5e25a1ff9243c84ba0a0809cfda2f6c7bd04451e16  /tmp/mark_m5.py" | shasum -a 256 -c -
+backend/.venv/bin/python /tmp/mark_m5.py --path .
+```
+
+The grader stays outside the repository and is never committed. The live
+grader reads the committed files from GitHub, so commit and push changes before
+running it. A passing live run reports `SCORE: 100/100`.
+
+## Rollback
+
+Argo CD deploys what is on the `main` branch, from the `k8s` folder.
+To roll back, undo the commit that deployed the bad image with a new commit:
+
+```bash
+git switch main
+git pull --ff-only
+git log --oneline -- k8s/deployment.yaml
+git revert COMMIT_SHA
+git push origin main
+```
+
+Replace `COMMIT_SHA` with the image-bump commit shown in the log. If reverting
+a pull request's merge commit, use `git revert -m 1 MERGE_COMMIT_SHA`; for a
+squash merge or a normal image-bump commit, use `git revert COMMIT_SHA`.
+If `main` requires pull requests, push the revert on a new branch and merge
+that pull request instead.
+
+Argo CD deploys the previous version within about three minutes after the
+revert reaches `main`. To check immediately, request a refresh and watch the
+rollout:
+
+```bash
+kubectl -n argocd annotate application repo-manager \
+  argocd.argoproj.io/refresh=normal --overwrite
+kubectl -n m4 rollout status deployment/repo-manager --timeout=180s
+kubectl -n m4 get deployment repo-manager -o jsonpath='{..image}'
+```
+
+Do not use `kubectl rollout undo`: self-heal would put the bad version back
+because Git still names that image. Keep both the image bump and its revert in
+history so the deployment and rollback have an audit trail.
 
 ## Current API
 
